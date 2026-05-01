@@ -3,7 +3,7 @@ import os
 import yaml
 from pathlib import Path
 
-AGENT_BASE = Path(__file__).resolve().parents[3]
+AGENT_BASE = Path(__file__).resolve().parents[2]
 
 
 def load_config(project: str) -> dict:
