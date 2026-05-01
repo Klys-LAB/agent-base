@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# agent-base CLI 진입점 (ADR-001 D4)
+# 사용법: agent <command> [project] [args...]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_BASE="$(dirname "$SCRIPT_DIR")"
+
+usage() {
+  echo "Usage: agent <command> [project]"
+  echo ""
+  echo "Commands:"
+  echo "  start  <project>   systemd unit 시작 (agent@<project>.service)"
+  echo "  stop   <project>   systemd unit 중지"
+  echo "  status <project>   unit 상태 확인"
+  echo "  logs   <project>   journalctl 로그 (최근 50줄)"
+  echo "  deps   <project>   의존성 목록"
+  echo ""
+  echo "Projects: $(ls "$AGENT_BASE/projects/" 2>/dev/null | tr '\n' ' ')"
+}
+
+[[ $# -lt 1 ]] && { usage; exit 1; }
+
+CMD="$1"
+PROJECT="${2:-}"
+
+case "$CMD" in
+  start)
+    [[ -z "$PROJECT" ]] && { echo "ERROR: project required"; exit 1; }
+    sudo systemctl start "agent@${PROJECT}.service"
+    ;;
+  stop)
+    [[ -z "$PROJECT" ]] && { echo "ERROR: project required"; exit 1; }
+    sudo systemctl stop "agent@${PROJECT}.service"
+    ;;
+  status)
+    [[ -z "$PROJECT" ]] && { echo "ERROR: project required"; exit 1; }
+    sudo systemctl status "agent@${PROJECT}.service"
+    ;;
+  logs)
+    [[ -z "$PROJECT" ]] && { echo "ERROR: project required"; exit 1; }
+    sudo journalctl -u "agent@${PROJECT}.service" -n 50 --no-pager
+    ;;
+  deps)
+    [[ -z "$PROJECT" ]] && { echo "ERROR: project required"; exit 1; }
+    cat "$AGENT_BASE/projects/${PROJECT}/dependencies.txt"
+    ;;
+  *)
+    echo "Unknown command: $CMD"
+    usage
+    exit 1
+    ;;
+esac

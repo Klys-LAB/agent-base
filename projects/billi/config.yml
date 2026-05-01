@@ -1,0 +1,26 @@
+# BILLI 프로젝트 설정 (agent-base/projects/billi/config.yml)
+# ADR-001 D4 정합
+
+project: billi
+repo_path: /root/Klys-LAB/BILLI/supporter
+github_repo: Klys-LAB/BILLI
+
+poller:
+  interval_sec: 60
+  branch_prefix: supporter/
+
+dispatch:
+  max_turns: 100
+  max_budget_usd: 5.00
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Grep
+    - Glob
+
+notify:
+  telegram_bot: BILLI_supporter_Bot
+
+dependencies_file: projects/billi/dependencies.txt

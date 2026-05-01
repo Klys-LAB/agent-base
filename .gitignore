@@ -1,0 +1,6 @@
+projects/*/secrets.env
+projects/*/repo
+*.log
+__pycache__/
+*.pyc
+.env
