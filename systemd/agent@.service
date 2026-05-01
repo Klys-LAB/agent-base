@@ -1,0 +1,18 @@
+[Unit]
+Description=agent-base agent for project %i
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Klys-LAB/agent-base
+ExecStart=/usr/bin/python3 /root/Klys-LAB/agent-base/projects/%i/agent-%i.py
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-%i
+
+[Install]
+WantedBy=multi-user.target
