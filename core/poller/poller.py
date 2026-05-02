@@ -57,12 +57,29 @@ def list_new_order_files(repo_path: Path, old_sha: str, new_sha: str,
             if f.startswith(orders_dir) and f.endswith(".md")]
 
 
-def scan_order_files(repo_path: Path, orders_dir: str = "orders/") -> list[str]:
-    """orders/ 디렉터리 전체 스캔 — first-run retroactive 감지용."""
-    orders_path = repo_path / orders_dir
-    if not orders_path.exists():
+def scan_recent_order_files(repo_path: Path, orders_dir: str = "orders/",
+                             lookback_sec: int = 7200) -> list[str]:
+    """재시작 후 retroactive 스캔 — 최근 lookback_sec 이내 추가된 orders/*.md 반환.
+
+    전체 디렉터리 스캔 대신 git log --since 윈도우 사용:
+    - 기존 완료 orders (P0·P1 등, 며칠 전 커밋) → 창 밖 → 재실행 0건
+    - 최신 orders (방금 커밋) → 창 안 → 정상 감지
+    - state/ 파일 없어도 old orders 재실행 없음 (시간 기반 안전 경계)
+    """
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=lookback_sec)
+    since = cutoff.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    r = subprocess.run(
+        ["git", "log", "--name-only", "--diff-filter=A",
+         "--pretty=format:", f"--since={since}", "--", orders_dir],
+        cwd=str(repo_path), capture_output=True, text=True
+    )
+    if r.returncode != 0:
         return []
-    return sorted(str(f.relative_to(repo_path)) for f in orders_path.glob("*.md"))
+    return sorted(set(
+        f for f in r.stdout.splitlines()
+        if f.startswith(orders_dir) and f.endswith(".md")
+    ))
 
 
 def order_targets_supporter(order_path: Path) -> bool:

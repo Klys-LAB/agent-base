@@ -12,7 +12,7 @@ from core.lib.config import load_config, load_secrets
 from core.log.logger import info, warn, error
 from core.lock.lock import acquire, release, is_locked
 from core.poller.poller import (
-    list_new_order_files, scan_order_files,
+    list_new_order_files, scan_recent_order_files,
     order_targets_supporter, main_head_sha,
 )
 from core.dispatch.dispatch import claude_available, run_order
@@ -108,10 +108,13 @@ def main():
         error(PROJECT, "health", "필수 의존성 누락", **h["required"])
         sys.exit(1)
 
-    info(PROJECT, "main", "agent-billi 시작", interval=interval, orders_path=orders_path)
+    lookback = cfg.get("poller", {}).get("retroactive_lookback_sec", 7200)
+    info(PROJECT, "main", "agent-billi 시작", interval=interval,
+         orders_path=orders_path, retroactive_lookback_sec=lookback)
 
-    # First run: retroactive scan — 미처리 보조자 오더 감지
-    for order_file in scan_order_files(repo_path, orders_path):
+    # First run: retroactive scan — 최근 lookback_sec 이내 orders만 감지
+    # (전체 스캔 금지: state/ 비어있을 때 기존 orders 전부 재실행되는 버그 방지)
+    for order_file in scan_recent_order_files(repo_path, orders_path, lookback):
         if not is_order_processed(Path(order_file).stem):
             dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
 

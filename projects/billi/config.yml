@@ -7,7 +7,8 @@ github_repo: Klys-LAB/BILLI
 
 poller:
   interval_sec: 60
-  orders_path: orders/   # git diff 기반 감지 — branch_prefix 방식 폐기 (PR#4)
+  orders_path: orders/
+  retroactive_lookback_sec: 7200  # 재시작 후 최근 2시간 이내 orders만 스캔 (기존 orders 재실행 방지)
 
 dispatch:
   max_turns: 100
