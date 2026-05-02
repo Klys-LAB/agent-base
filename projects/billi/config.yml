@@ -8,7 +8,7 @@ github_repo: Klys-LAB/BILLI
 poller:
   interval_sec: 60
   orders_path: orders/
-  retroactive_lookback_sec: 7200  # 재시작 후 최근 2시간 이내 orders만 스캔 (기존 orders 재실행 방지)
+  retroactive_lookback_sec: 86400  # 재시작 후 최근 24시간 이내 orders만 스캔 (P2-003-R1 등 미처리 누락 방지, BILLI msg 440)
 
 dispatch:
   max_turns: 100
