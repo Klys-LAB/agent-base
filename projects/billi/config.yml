@@ -7,7 +7,7 @@ github_repo: Klys-LAB/BILLI
 
 poller:
   interval_sec: 60
-  branch_prefix: supporter/
+  orders_path: orders/   # git diff 기반 감지 — branch_prefix 방식 폐기 (PR#4)
 
 dispatch:
   max_turns: 100
