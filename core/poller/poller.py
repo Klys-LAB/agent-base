@@ -36,3 +36,39 @@ def main_head_sha(repo_path: Path) -> str:
     if r.returncode != 0 or not r.stdout:
         return ""
     return r.stdout.split()[0]
+
+
+def list_new_order_files(repo_path: Path, old_sha: str, new_sha: str,
+                          orders_dir: str = "orders/") -> list[str]:
+    """old_sha..new_sha 사이에 추가된 orders/ .md 파일 목록 반환.
+
+    Designer auto-merge PR은 closed 상태이므로 open PR 필터로는 감지 불가.
+    git diff --diff-filter=A 로 새로 추가된 파일만 검출 (수정·삭제 제외).
+    """
+    if not old_sha or not new_sha:
+        return []
+    r = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=A", old_sha, new_sha, "--", orders_dir],
+        cwd=str(repo_path), capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        return []
+    return [f for f in r.stdout.splitlines()
+            if f.startswith(orders_dir) and f.endswith(".md")]
+
+
+def scan_order_files(repo_path: Path, orders_dir: str = "orders/") -> list[str]:
+    """orders/ 디렉터리 전체 스캔 — first-run retroactive 감지용."""
+    orders_path = repo_path / orders_dir
+    if not orders_path.exists():
+        return []
+    return sorted(str(f.relative_to(repo_path)) for f in orders_path.glob("*.md"))
+
+
+def order_targets_supporter(order_path: Path) -> bool:
+    """오더 파일 본문에 '수신자: 보조자' 포함 여부 확인."""
+    try:
+        text = order_path.read_text(encoding="utf-8")
+        return "수신자" in text and "보조자" in text
+    except OSError:
+        return False
