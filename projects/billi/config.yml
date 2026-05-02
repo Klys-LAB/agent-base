@@ -2,7 +2,7 @@
 # ADR-001 D4 정합
 
 project: billi
-repo_path: /root/Klys-LAB/BILLI/supporter
+repo_path: /root/Klys-LAB/BILLI
 github_repo: Klys-LAB/BILLI
 
 poller:
