@@ -15,7 +15,7 @@ ExecStart=/usr/bin/x11vnc \
     -noxdamage \
     -forever \
     -shared \
-    -bg false \
+    -nobg \
     -rfbport 5900 \
     -o /var/log/x11vnc.log
 Restart=on-failure
