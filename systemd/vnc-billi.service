@@ -1,0 +1,25 @@
+[Unit]
+Description=x11vnc — BILLI MT5 GUI 1회 로그인용 (BILLI msg 455, P2-003-R2 Phase 1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=DISPLAY=:98
+Environment=HOME=/root
+ExecStart=/usr/bin/x11vnc \
+    -display :98 \
+    -localhost \
+    -rfbauth /root/.x11vnc/passwd \
+    -noxdamage \
+    -forever \
+    -shared \
+    -bg false \
+    -rfbport 5900 \
+    -o /var/log/x11vnc.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

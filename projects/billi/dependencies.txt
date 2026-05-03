@@ -14,3 +14,7 @@ pyyaml     | 2026-05-03 | core/lib/config.py — projects/<proj>/config.yml 파�
 # 시스템 (handoff) — BILLI msg 447, L1 #48 handoff Drive 표준 VPS 적용
 rclone     | 2026-05-03 | systemd/rclone-handoff.service — gdrive:Klys-LAB/BILLI/handoff 마운트 | handoff Drive 표준 폐기 시
 fuse3      | 2026-05-03 | rclone mount FUSE 백엔드 (fusermount3 unmount) | rclone 제거 시
+
+# 시스템 (VNC GUI 1회 로그인) — BILLI msg 455, P2-003-R2 Phase 1 (broker login 패턴)
+x11vnc     | 2026-05-03 | systemd/vnc-billi.service — Xvfb :98 attach, MT5 GUI 1회 로그인 | broker_meta 자동 동기화 정착 시 (또는 후속 P2-003-R3 결정)
+openssl    | 2026-05-03 | setup-vnc.sh password 발급 (rand -base64) | VNC 제거 시
