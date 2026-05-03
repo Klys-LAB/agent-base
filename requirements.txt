@@ -1,0 +1,5 @@
+# agent-base Python 런타임 의존성 (ADR-001 D7 정합)
+# systemd/install.sh 가 pip install --break-system-packages 로 시스템 Python 에 설치.
+# ExecStart=/usr/bin/python3 (시스템 Python) 와 동일 환경 보장.
+
+pyyaml>=6.0
