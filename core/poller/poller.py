@@ -38,6 +38,51 @@ def main_head_sha(repo_path: Path) -> str:
     return r.stdout.split()[0]
 
 
+def sync_repo(repo_path: Path) -> tuple[bool, str]:
+    """git fetch + ff-only pull origin main. 매 cycle 호출 (BILLI msg 449).
+
+    이전 버그 — list_new_order_files 가 git diff old_sha new_sha 를 사용하지만
+    fetch 누락 시 new_sha 가 local objects 에 없어 diff 가 빈 결과 반환.
+    P2-003-R1 (8a73d43, 6h+ 무감지) 직접 원인.
+
+    정책:
+    - working tree dirty → skip (False, "dirty"). 자동 stash 금지.
+    - fetch 실패 (네트워크) → skip (False, "fetch fail"). 다음 cycle 재시도.
+    - ff-only 실패 (local 분기·conflict) → skip (False, "non-ff"). force pull 금지.
+    - 모든 실패 시 last_sha 미갱신 → 다음 cycle 정상 복구되면 자연 catch up.
+
+    Returns: (ok, error_msg). ok=True 시 error_msg="" + local main = origin/main.
+    """
+    # 1. dirty check — uncommitted changes 보호
+    r = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=str(repo_path), capture_output=True, text=True, timeout=10
+    )
+    if r.returncode != 0:
+        return False, f"git status fail: {r.stderr.strip()[:120]}"
+    if r.stdout.strip():
+        n = len(r.stdout.splitlines())
+        return False, f"working tree dirty ({n} files) — manual cleanup 필요"
+
+    # 2. fetch origin
+    r = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=str(repo_path), capture_output=True, text=True, timeout=30
+    )
+    if r.returncode != 0:
+        return False, f"git fetch fail: {r.stderr.strip()[:200]}"
+
+    # 3. ff-only pull (force pull 금지)
+    r = subprocess.run(
+        ["git", "pull", "--ff-only", "origin", "main"],
+        cwd=str(repo_path), capture_output=True, text=True, timeout=30
+    )
+    if r.returncode != 0:
+        return False, f"git pull --ff-only fail (local 분기·conflict 가능): {r.stderr.strip()[:200]}"
+
+    return True, ""
+
+
 def list_new_order_files(repo_path: Path, old_sha: str, new_sha: str,
                           orders_dir: str = "orders/") -> list[str]:
     """old_sha..new_sha 사이에 추가된 orders/ .md 파일 목록 반환.

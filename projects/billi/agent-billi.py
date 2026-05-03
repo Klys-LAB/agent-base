@@ -13,7 +13,7 @@ from core.log.logger import info, warn, error
 from core.lock.lock import acquire, release, is_locked
 from core.poller.poller import (
     list_new_order_files, scan_recent_order_files,
-    order_targets_supporter, main_head_sha,
+    order_targets_supporter, main_head_sha, sync_repo,
 )
 from core.dispatch.dispatch import claude_available, run_order
 from core.notify.telegram import send
@@ -112,22 +112,41 @@ def main():
     info(PROJECT, "main", "agent-billi 시작", interval=interval,
          orders_path=orders_path, retroactive_lookback_sec=lookback)
 
-    # First run: retroactive scan — 최근 lookback_sec 이내 orders만 감지
-    # (전체 스캔 금지: state/ 비어있을 때 기존 orders 전부 재실행되는 버그 방지)
-    for order_file in scan_recent_order_files(repo_path, orders_path, lookback):
-        if not is_order_processed(Path(order_file).stem):
-            dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
+    # First run: 동기화 후 retroactive scan
+    # - sync_repo: fetch + ff-only pull (BILLI msg 449, list_new_order_files 의존성)
+    # - scan_recent_order_files: state/ 비어도 lookback 윈도우로 안전 경계
+    ok, err = sync_repo(repo_path)
+    if not ok:
+        warn(PROJECT, "sync", "초기 sync 실패 — retroactive 스캔 미실행", err=err)
+    else:
+        for order_file in scan_recent_order_files(repo_path, orders_path, lookback):
+            if not is_order_processed(Path(order_file).stem):
+                dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
 
     last_sha = main_head_sha(repo_path)
+    sync_fail_streak = 0
+    SYNC_ALERT_STREAK = 5  # 5 cycle (5 분) 연속 실패 시 1회 Telegram 알림
     while _running:
         try:
-            sha = main_head_sha(repo_path)
-            if sha and sha != last_sha:
-                info(PROJECT, "poller", "main HEAD 변경 감지", sha=sha[:8])
-                new_orders = list_new_order_files(repo_path, last_sha, sha, orders_path)
-                last_sha = sha
-                for order_file in new_orders:
-                    dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
+            ok, err = sync_repo(repo_path)
+            if not ok:
+                sync_fail_streak += 1
+                warn(PROJECT, "sync", "sync_repo skip", err=err, streak=sync_fail_streak)
+                if sync_fail_streak == SYNC_ALERT_STREAK and tg_token and tg_chat:
+                    send(tg_token, tg_chat,
+                         f"[agent-billi] ⚠️ sync_repo {SYNC_ALERT_STREAK} cycle 연속 실패 — {err}")
+            else:
+                if sync_fail_streak > 0:
+                    info(PROJECT, "sync", "sync_repo 복구", prev_streak=sync_fail_streak)
+                    sync_fail_streak = 0
+
+                sha = main_head_sha(repo_path)
+                if sha and sha != last_sha:
+                    info(PROJECT, "poller", "main HEAD 변경 감지", sha=sha[:8])
+                    new_orders = list_new_order_files(repo_path, last_sha, sha, orders_path)
+                    last_sha = sha
+                    for order_file in new_orders:
+                        dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
         except Exception as e:
             error(PROJECT, "main", f"루프 예외: {e}")
 
