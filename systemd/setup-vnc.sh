@@ -86,6 +86,26 @@ EOF
 fi
 
 echo ""
+echo "=== 2.5 x11vnc 옵션 사전 검증 (BILLI msg 459 정합) ==="
+# unit ExecStart 가 사용하는 옵션을 x11vnc -opts 출력과 대조
+# 미지원 옵션 발견 시 즉시 stop — 197-restart 루프 방지
+REQUIRED_OPTS="display localhost rfbauth noxdamage forever shared rfbport"
+opts_help="$(x11vnc -opts 2>&1)"
+missing=""
+for opt in $REQUIRED_OPTS; do
+  if ! echo "$opts_help" | grep -E "^\s*-${opt}\b" >/dev/null; then
+    missing="$missing $opt"
+  fi
+done
+if [ -n "$missing" ]; then
+  echo "  FAIL: 미지원 옵션 발견 —$missing"
+  echo "  x11vnc 버전: $(x11vnc -version 2>&1 | head -1)"
+  echo "  해결: vnc-billi.service ExecStart 옵션 정정 PR 발행 필요"
+  exit 1
+fi
+echo "  OK: 모든 ExecStart 옵션 지원 ($REQUIRED_OPTS)"
+
+echo ""
 echo "=== 3. VNC password 발급 ==="
 mkdir -p "$PASSWD_DIR"
 chmod 700 "$PASSWD_DIR"

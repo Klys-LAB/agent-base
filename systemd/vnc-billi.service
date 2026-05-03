@@ -15,11 +15,14 @@ ExecStart=/usr/bin/x11vnc \
     -noxdamage \
     -forever \
     -shared \
-    -nobg \
     -rfbport 5900 \
     -o /var/log/x11vnc.log
+# x11vnc 0.9.16 (Ubuntu 24.04) 는 -bg/-nobg 미지원. systemd Type=simple 이
+# foreground 동작 자동 보장 (double-fork 안 함) — 별도 옵션 불필요.
 Restart=on-failure
 RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Install]
 WantedBy=multi-user.target
