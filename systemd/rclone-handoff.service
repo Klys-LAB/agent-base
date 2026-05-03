@@ -1,0 +1,28 @@
+[Unit]
+Description=rclone mount — Google Drive Klys-LAB/BILLI/handoff (BILLI handoff 표준 v1.0)
+After=network-online.target
+Wants=network-online.target
+AssertPathIsDirectory=/root/Klys-LAB/handoff
+
+[Service]
+Type=notify
+Environment=HOME=/root
+ExecStartPre=/bin/mkdir -p /root/Klys-LAB/handoff
+ExecStart=/usr/bin/rclone mount gdrive:Klys-LAB/BILLI/handoff /root/Klys-LAB/handoff \
+    --config /root/.config/rclone/rclone.conf \
+    --vfs-cache-mode writes \
+    --vfs-cache-max-age 1h \
+    --vfs-cache-max-size 1G \
+    --dir-cache-time 5m \
+    --umask 077 \
+    --uid 0 \
+    --gid 0 \
+    --log-level INFO \
+    --log-file /var/log/rclone-handoff.log
+ExecStop=/bin/fusermount3 -u /root/Klys-LAB/handoff
+Restart=on-failure
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target
