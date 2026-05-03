@@ -15,6 +15,9 @@ from core.poller.poller import (
     list_new_order_files, scan_recent_order_files,
     order_targets_supporter, main_head_sha, sync_repo,
 )
+from core.poller.order_meta import (
+    read_meta, mark_dispatched, mark_done, mark_failed, is_dispatchable,
+)
 from core.dispatch.dispatch import claude_available, run_order
 from core.notify.telegram import send
 from core.health.health import check as health_check
@@ -59,14 +62,37 @@ def dispatch_order(repo_path: Path, order_file: str, cfg: dict,
     if not order_targets_supporter(order_path):
         info(PROJECT, "dispatch", "보조자 대상 아님 — 스킵", order=order_stem)
         return
-    if is_order_processed(order_stem):
-        info(PROJECT, "dispatch", "이미 처리됨 — 스킵", order=order_stem)
+
+    # ORDER 메타마커 idempotency (cross-host: Mac·VPS 동시 dispatch 차단)
+    # AGENTS §19.6 + ORDER msg 466 C-2 정합
+    meta = read_meta(order_path)
+    status = meta.get("status", "pending")
+    if status != "pending":
+        info(PROJECT, "dispatch", f"메타마커 status={status} — 스킵", order=order_stem)
         return
 
+    # GATE 검사 — [GATE] user 또는 domain 은 자동 dispatch skip (AGENTS §20)
+    gate = meta.get("gate", "auto")
+    if gate == "user":
+        info(PROJECT, "dispatch", "[GATE] user — 사용자 처리 영역, 스킵", order=order_stem)
+        return
+
+    if is_order_processed(order_stem):
+        info(PROJECT, "dispatch", "이미 처리됨 (state) — 스킵", order=order_stem)
+        return
+
+    # POSIX flock — same-host mutual exclusion (AGENTS §19.6)
     lock_key = f"order-{order_stem}"
     if not acquire(LOCK_DIR, lock_key, timeout_sec=7200):
-        info(PROJECT, "dispatch", "처리 중 (lock) — 스킵", order=order_stem)
+        info(PROJECT, "dispatch", "처리 중 (flock) — 스킵", order=order_stem)
         return
+
+    # 메타마커 dispatched 갱신 (cross-host idempotency 발효)
+    try:
+        mark_dispatched(order_path)
+    except Exception as e:
+        warn(PROJECT, "dispatch", f"메타마커 dispatched 갱신 실패: {e}", order=order_stem)
+        # flock 은 이미 보유 — 계속 진행 (skip 정도의 critical 실패 아님)
 
     info(PROJECT, "dispatch", "ORDER 감지·실행 시작", order=order_stem)
     if tg_token and tg_chat:
@@ -86,12 +112,21 @@ def dispatch_order(repo_path: Path, order_file: str, cfg: dict,
     )
 
     mark_order_processed(order_stem)
+    # 메타마커 종료 상태
+    try:
+        if code == 0:
+            mark_done(order_path)
+        else:
+            mark_failed(order_path)
+    except Exception as e:
+        warn(PROJECT, "dispatch", f"메타마커 종료 갱신 실패: {e}", order=order_stem, code=code)
+
     release(LOCK_DIR, lock_key)
 
-    status = "PASS" if code == 0 else "FAIL"
-    info(PROJECT, "dispatch", f"ORDER {status}", order=order_stem, code=code)
+    status_str = "PASS" if code == 0 else "FAIL"
+    info(PROJECT, "dispatch", f"ORDER {status_str}", order=order_stem, code=code)
     if tg_token and tg_chat:
-        send(tg_token, tg_chat, f"[agent-billi] ORDER {status}: {order_stem}")
+        send(tg_token, tg_chat, f"[agent-billi] ORDER {status_str}: {order_stem}")
 
 
 def main():
