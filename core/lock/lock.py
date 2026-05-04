@@ -1,7 +1,30 @@
-"""core/lock/lock.py — POSIX flock + 메타마커 lock 메커니즘 (BILLI ORDER msg 466 C-1·C-2, AGENTS §19.6)"""
+"""core/lock/lock.py — POSIX flock + 메타마커 lock 메커니즘 (BILLI ORDER msg 466 C-1·C-2 + msg 568 (b) ADR-005-B, AGENTS §19.6 v1.7)
+
+Two-layer model — flock + 메타마커 결합:
+
+- flock-based acquire/release/is_locked: 같은 host 내 cross-process mutual
+  exclusion. POSIX fcntl.flock(LOCK_EX|LOCK_NB), process 종료 시 OS 가
+  자동 release (crash·SIGKILL 후 stale lock 잔재 0). mtime safety net 으로
+  host crash 등 극단 케이스 대비.
+- flock_exclusive context manager: 동일 메커니즘의 Pythonic API
+  (with-block + FlockBusy 즉시 raise). ADR-005-B atomic dispatch 흐름에서
+  사용.
+
+cross-host (Mac·VPS) idempotency 는 본 모듈 영역 외 — ORDER 메타마커
+(status: dispatched) 가 담당 (core/meta_mark·core/poller/order_meta).
+
+ADR-005-B 정착 시 dispatch 흐름:
+    with flock_exclusive(host_lock_path, blocking=False):  # 같은 host 1 actor
+        meta_mark.transition(order, "pending", "dispatched")
+        commit + push
+        run_order(...)
+        meta_mark.transition(order, "dispatched", "done"|"failed")
+        commit + push
+"""
 import fcntl
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -117,3 +140,43 @@ def is_locked(base_dir: Path, name: str, timeout_sec: int = LOCK_TIMEOUT_SEC) ->
             os.close(fd)
         except OSError:
             pass
+
+
+class FlockBusy(Exception):
+    """flock_exclusive — non-blocking 모드에서 lock 보유 실패."""
+
+
+@contextmanager
+def flock_exclusive(path: Path, blocking: bool = False):
+    """POSIX flock LOCK_EX context manager.
+
+    - blocking=False (기본): 즉시 fail (FlockBusy). ORDER §19.6 정합 —
+      "Python fcntl.flock(LOCK_EX|LOCK_NB). 중복 dispatch 시 즉시 fail
+      (대기 X), 다음 cycle 자연 재시도."
+    - blocking=True: 보유까지 대기. 일반 dispatch 외 영역 (예: 디버그) 한정.
+
+    Process 종료 시 OS 가 자동 release — Python 프로세스 crash 또는 SIGKILL
+    이후에도 stale lock 잔재 0 (mtime-based 방식과 동일 안전성).
+
+    Usage:
+        with flock_exclusive(Path("/tmp/agent-billi.flock")):
+            ...  # critical section
+
+    Raises FlockBusy when blocking=False and another process holds the lock.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fp = open(path, "a+")
+    flag = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+    try:
+        fcntl.flock(fp.fileno(), flag)
+    except BlockingIOError as e:
+        fp.close()
+        raise FlockBusy(f"flock busy: {path}") from e
+    try:
+        yield fp
+    finally:
+        try:
+            fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fp.close()

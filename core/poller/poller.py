@@ -1,6 +1,7 @@
 """core/poller/poller.py — GitHub PR state 폴링·orders 감지 (ADR-001 D5 poller 모듈)"""
 import json
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -166,3 +167,120 @@ def scan_pending_orders(repo_path: Path, orders_dir: str = "orders/") -> list[st
         if is_dispatchable(p):
             result.append(f"{prefix}/{p.name}")
     return result
+
+
+# ─── ADR-005-B 메타마커 dispatch 영역 ────────────────────────────────────
+#
+# atomic transition = 메타마커 갱신 → git add → commit → push 한 묶음.
+# 실패 시 retry (max 3회), 모두 실패하면 다음 cycle stale 감지로 자연 회복.
+#
+# 메시지 brand 형식 (ORDER §3.4):
+#   meta(ADR-005-B): orders/<id>.md status: <from> -> <to>
+
+
+def _git(repo_path: Path, args: list[str], timeout: int = 30) -> tuple[int, str, str]:
+    r = subprocess.run(
+        ["git"] + args,
+        cwd=str(repo_path), capture_output=True, text=True, timeout=timeout,
+    )
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def commit_and_push_meta(
+    repo_path: Path,
+    order_file: str,
+    from_status: str,
+    to_status: str,
+    branch: str = "main",
+    retries: int = 3,
+) -> tuple[bool, str]:
+    """git add <order_file> + commit + push origin <branch>. atomic 묶음.
+
+    각 retry 사이 짧은 backoff. 모두 실패 시 (False, error_msg). 호출 측은
+    메타마커가 file 에는 반영되었지만 push 가 누락된 partial state 를 인식해야 함
+    — 다음 cycle 의 stale 감지 (is_dispatched_stale) 또는 git 동기화 (sync_repo)
+    가 자연 복구 path.
+
+    ORDER §3.4 brand: meta(ADR-005-B): orders/<id>.md status: <from> -> <to>
+    """
+    msg = f"meta(ADR-005-B): {order_file} status: {from_status} -> {to_status}"
+    last_err = ""
+    for attempt in range(1, retries + 1):
+        code, _, err = _git(repo_path, ["add", "--", order_file])
+        if code != 0:
+            last_err = f"git add fail: {err[:200]}"
+            time.sleep(0.5 * attempt)
+            continue
+        code, _, err = _git(repo_path, ["commit", "-m", msg])
+        if code != 0:
+            # nothing to commit (메타마커가 이미 같은 상태) → 성공으로 취급
+            if "nothing to commit" in err.lower() or "nothing added" in err.lower():
+                return True, ""
+            last_err = f"git commit fail: {err[:200]}"
+            time.sleep(0.5 * attempt)
+            continue
+        code, _, err = _git(repo_path, ["push", "origin", branch], timeout=60)
+        if code != 0:
+            last_err = f"git push fail: {err[:200]}"
+            time.sleep(0.5 * attempt)
+            continue
+        return True, ""
+    return False, last_err
+
+
+def mark_dispatched_atomic(
+    repo_path: Path,
+    order_file: str,
+    pid: int | None = None,
+) -> tuple[bool, str]:
+    """pending -> dispatched + commit + push (atomic 묶음).
+
+    Returns (ok, error_msg). ok=False 시 호출 측은 dispatch skip — 다른 actor 가
+    선점했거나 git push 실패. partial state (file 변경됐으나 push 실패) 는
+    다음 sync_repo 에서 해소.
+    """
+    from core.meta_mark import transition  # 순환 import 회피
+
+    order_path = repo_path / order_file
+    ok, _ = transition(order_path, "pending", "dispatched", pid=pid)
+    if not ok:
+        return False, "transition failed (status != pending)"
+    return commit_and_push_meta(repo_path, order_file, "pending", "dispatched")
+
+
+def mark_terminal_atomic(
+    repo_path: Path,
+    order_file: str,
+    to_status: str,  # "done" | "failed"
+) -> tuple[bool, str]:
+    """dispatched -> done|failed + commit + push."""
+    from core.meta_mark import transition
+
+    if to_status not in ("done", "failed"):
+        return False, f"invalid terminal status: {to_status}"
+    order_path = repo_path / order_file
+    ok, _ = transition(order_path, "dispatched", to_status)
+    if not ok:
+        return False, f"transition failed (status != dispatched, target={to_status})"
+    return commit_and_push_meta(repo_path, order_file, "dispatched", to_status)
+
+
+def release_stale_atomic(
+    repo_path: Path,
+    order_file: str,
+    timeout_sec: int = 3600,
+) -> tuple[bool, str]:
+    """stale dispatched -> pending (자동 release).
+
+    is_dispatched_stale True 일 때만 transition. dispatched_at·dispatched_pid clear.
+    다음 cycle 에서 자연 재dispatch.
+    """
+    from core.meta_mark import transition, is_dispatched_stale
+
+    order_path = repo_path / order_file
+    if not is_dispatched_stale(order_path, timeout_sec=timeout_sec):
+        return False, "not stale"
+    ok, _ = transition(order_path, "dispatched", "pending")
+    if not ok:
+        return False, "transition failed (status != dispatched)"
+    return commit_and_push_meta(repo_path, order_file, "dispatched", "pending")

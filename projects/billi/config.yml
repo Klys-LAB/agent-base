@@ -24,4 +24,8 @@ dispatch:
 notify:
   telegram_bot: BILLI_supporter_Bot
 
+# ADR-005-B 메타마커 dispatch (AGENTS §19.6 v1.7) — stale 1h 자동 release
+lock:
+  stale_timeout_sec: 3600
+
 dependencies_file: projects/billi/dependencies.txt
