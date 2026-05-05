@@ -134,3 +134,35 @@ def order_targets_supporter(order_path: Path) -> bool:
         return "수신자" in text and "보조자" in text
     except OSError:
         return False
+
+
+def scan_pending_orders(repo_path: Path, orders_dir: str = "orders/") -> list[str]:
+    """orders/ 디렉터리 전체 scan — frontmatter status: pending 인 .md 파일 반환.
+
+    AGENTS §19.6 frontmatter 단일 진실 정합 (BILLI msg 590 root cause fix).
+    git diff filter 의존 폐기 — added/modified/순서 무관.
+
+    이전 패턴 (list_new_order_files + --diff-filter=A) 의 root cause:
+    - added 만 catch — modification (갱신본 ORDER) skip
+    - PRE-P3-B-R2 (msg 588) 갱신본 dispatch 영역 0 (BILLI PR #176)
+    - baseline (S-007·S-008·ADR-005-B) added 패턴 정합 영역만 통과
+
+    본 함수 영역:
+    - orders/ 전체 scan (.md 파일)
+    - frontmatter status: pending 만 반환 (is_dispatchable 호출)
+    - is_order_processed 체크는 호출자 책임 (state/processed-*.done)
+
+    Returns: orders/<filename>.md 형식 list (정렬, idempotent).
+    """
+    from core.poller.order_meta import is_dispatchable
+
+    od = repo_path / orders_dir
+    if not od.is_dir():
+        return []
+
+    prefix = orders_dir.rstrip("/")
+    result = []
+    for p in sorted(od.glob("*.md")):
+        if is_dispatchable(p):
+            result.append(f"{prefix}/{p.name}")
+    return result
