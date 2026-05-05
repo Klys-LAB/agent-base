@@ -12,7 +12,7 @@ from core.lib.config import load_config, load_secrets
 from core.log.logger import info, warn, error
 from core.lock.lock import acquire, release, is_locked
 from core.poller.poller import (
-    list_new_order_files, scan_recent_order_files,
+    list_new_order_files, scan_recent_order_files, scan_pending_orders,
     order_targets_supporter, main_head_sha, sync_repo,
 )
 from core.poller.order_meta import (
@@ -175,13 +175,21 @@ def main():
                     info(PROJECT, "sync", "sync_repo 복구", prev_streak=sync_fail_streak)
                     sync_fail_streak = 0
 
+                # main HEAD 변경 감지 — 정보 log 만, dispatch 와 분리
+                # (이전 패턴: list_new_order_files + --diff-filter=A 가 modification 갱신본 skip,
+                #  BILLI msg 590 root cause). 본 fix 영역 — frontmatter 단일 진실 영역 dispatch.
                 sha = main_head_sha(repo_path)
                 if sha and sha != last_sha:
                     info(PROJECT, "poller", "main HEAD 변경 감지", sha=sha[:8])
-                    new_orders = list_new_order_files(repo_path, last_sha, sha, orders_path)
                     last_sha = sha
-                    for order_file in new_orders:
-                        dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
+
+                # AGENTS §19.6 frontmatter 단일 진실 — added/modified/순서 무관
+                # status: pending check (scan_pending_orders) + state/processed-*.done idempotency
+                for order_file in scan_pending_orders(repo_path, orders_path):
+                    order_stem = Path(order_file).stem
+                    if is_order_processed(order_stem):
+                        continue
+                    dispatch_order(repo_path, order_file, cfg, tg_token, tg_chat)
         except Exception as e:
             error(PROJECT, "main", f"루프 예외: {e}")
 
