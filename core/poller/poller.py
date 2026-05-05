@@ -129,12 +129,28 @@ def scan_recent_order_files(repo_path: Path, orders_dir: str = "orders/",
 
 
 def order_targets_supporter(order_path: Path) -> bool:
-    """오더 파일 본문에 '수신자: 보조자' 포함 여부 확인."""
+    """오더 파일이 supporter (보조자) 대상인지 본문 영역으로 판정.
+
+    AGENTS §18.1 통신 표준 [MSG] 헤더 영역 또는 본문 '수신자' 헤더 영역
+    'supporter' (영어) 또는 '보조자' (한국어) keyword 영역 검출.
+
+    BILLI msg 594 root cause fix — 이전 logic 영역 한국어 '보조자' 단독 의존
+    영역 영어 'supporter' 만 사용한 ORDER skip. 본 갱신 영역 bilingual catch.
+    """
     try:
         text = order_path.read_text(encoding="utf-8")
-        return "수신자" in text and "보조자" in text
     except OSError:
         return False
+
+    # AGENTS §18.1 [MSG] 헤더 패턴 (5주체 통신 표준)
+    if "→supporter" in text or "→보조자" in text:
+        return True
+
+    # 본문 '수신자' 헤더 영역 (legacy + bilingual)
+    if "수신자" in text and ("supporter" in text or "보조자" in text):
+        return True
+
+    return False
 
 
 def scan_pending_orders(repo_path: Path, orders_dir: str = "orders/") -> list[str]:

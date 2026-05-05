@@ -28,6 +28,7 @@ from core.meta_mark import read as read_meta, find_pending, is_dispatched_stale
 from core.poller.poller import (
     main_head_sha, sync_repo,
     mark_dispatched_atomic, mark_terminal_atomic, release_stale_atomic,
+    order_targets_supporter,
 )
 from core.dispatch.dispatch import discover_pending_orders, run_order
 from core.notify.telegram import send
@@ -51,13 +52,8 @@ signal.signal(signal.SIGTERM, _stop)
 signal.signal(signal.SIGINT, _stop)
 
 
-def _is_supporter_target(repo_path: Path, order_file: str) -> bool:
-    p = repo_path / order_file
-    try:
-        text = p.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return "수신자" in text and "보조자" in text
+# classify_supporter logic 영역 — core/poller/poller.py::order_targets_supporter 단독.
+# DRY 정합 (BILLI msg 594 fix). bilingual (supporter / 보조자) + AGENTS §18.1 [MSG] 헤더 패턴.
 
 
 def dispatch_order(
@@ -74,7 +70,7 @@ def dispatch_order(
     if not order_path.exists():
         warn(PROJECT, "dispatch", "오더 파일 없음", order=order_file)
         return
-    if not _is_supporter_target(repo_path, order_file):
+    if not order_targets_supporter(order_path):
         info(PROJECT, "dispatch", "보조자 대상 아님 — 스킵", order=order_stem)
         return
 
